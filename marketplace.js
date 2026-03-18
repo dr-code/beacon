@@ -3,11 +3,12 @@
 // Serves the Beacon task marketplace. No npm dependencies (Node.js built-ins only).
 
 'use strict';
-const http  = require('http');
-const https = require('https');
-const fs    = require('fs');
-const path  = require('path');
-const os    = require('os');
+const http         = require('http');
+const https        = require('https');
+const fs           = require('fs');
+const path         = require('path');
+const os           = require('os');
+const { spawnSync } = require('child_process');
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const PORT         = 4747;
@@ -343,52 +344,92 @@ function getTokenStats() {
 }
 
 // ── Beacon index (beacon-index.md) ────────────────────────────────────────────
-const STOPWORDS = new Set(['a','an','the','is','are','was','were','be','been',
-  'have','has','had','do','does','did','will','would','could','should','may',
-  'might','can','this','that','these','those','for','and','or','but','if',
-  'in','on','at','to','of','with','by','from','into','about','it','its',
-  'use','used','using','when','how','what','which','you','your','all','any',
-  'each','both','more','most','some','such','not','only','than','too','very',
-  'via','per','as','so','up','out','off','over','then','also','than','well']);
 
-function generateKeywords(type, name, meta) {
-  const parts = [];
-
-  // name: split on hyphen/underscore → individual words
-  parts.push(...name.replace(/[-_]/g, ' ').split(' '));
-
-  // description: split on non-alpha, filter stopwords
+// Algorithmic fallback: used when claude -p is unavailable.
+function generateKeywordsFallback(type, name, meta) {
+  const STOP = new Set([
+    'a','an','the','and','or','but','if','in','on','at','to','of','for','with',
+    'by','from','into','about','via','per','as','so','up','out','then','than',
+    'is','are','was','were','be','been','have','has','had','do','does','did',
+    'will','would','could','should','may','might','can',
+    'this','that','these','those','it','its','you','all','any','each','both',
+    'more','most','some','such','not','only','too','very','well','also','when',
+    'how','what','which','who','use','used','using','proactively','always',
+    'never','immediately','first','ensure','make','start','end','based','given',
+    'new','existing','current','after','before','during','while','just','now',
+    'run','running','create','creating','write','writing','update','check',
+    'get','set','let','try','help','include','provide','return','everything',
+    'last','session','something','anything','nothing','my','your','their','few',
+    'many','much','every','whenever','them','don','wrote','said','made','got',
+  ]);
+  const words = [];
+  words.push(...name.split(/[-_]/));
+  if (meta.category) words.push(...meta.category.split(/[-_]/));
   if (meta.description) {
-    parts.push(...meta.description
-      .toLowerCase()
-      .replace(/[^a-z0-9 ]/g, ' ')
-      .split(/\s+/)
-      .filter(w => w.length > 2 && !STOPWORDS.has(w)));
+    words.push(...meta.description.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/));
   }
-
-  // category: split on hyphen
-  if (meta.category) {
-    parts.push(...meta.category.replace(/[-_]/g, ' ').split(' '));
+  if (Array.isArray(meta.examples)) {
+    for (const ex of meta.examples) {
+      // strip "Use/Have/Run the <name> to/for" preamble
+      const nameRe = name.replace(/[-_]/g, '[\\s-_]');
+      const cleaned = String(ex).replace(
+        new RegExp(`^(?:use|have|run|invoke)\\s+(?:the\\s+)?${nameRe}\\s+(?:to|for|when)\\s+`, 'i'), '');
+      words.push(...cleaned.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/));
+    }
   }
-
-  // for task bundles: include agent/skill names as keywords
   if (type === 'task') {
     for (const list of [meta.agents||[], meta.skills||[], meta.mcps||[]]) {
-      parts.push(...list.map(n => (n.name||n).replace(/[-_]/g, ' ')));
+      words.push(...list.map(n => (n.name||n)).flatMap(n => n.split(/[-_]/)));
     }
   }
-
-  // deduplicate, lowercase, filter short words and stopwords
   const seen = new Set();
-  const keywords = [];
-  for (const w of parts) {
+  const out = [];
+  for (const w of words) {
     const lw = w.toLowerCase().trim();
-    if (lw.length > 2 && !STOPWORDS.has(lw) && !seen.has(lw)) {
-      seen.add(lw);
-      keywords.push(lw);
-    }
+    if (lw.length > 2 && !STOP.has(lw) && !seen.has(lw)) { seen.add(lw); out.push(lw); }
   }
-  return keywords.slice(0, 20).join(', ');
+  return out.slice(0, 25).join(', ');
+}
+
+// Primary: invoke claude -p to generate semantically rich keywords.
+// Falls back to algorithmic extraction if claude is unavailable.
+function generateKeywords(type, name, meta) {
+  const exampleLines = (meta.examples || []).slice(0, 3).map(e => `  - ${e}`).join('\n');
+  const prompt = [
+    'Generate 20 search keywords for this Claude Code component.',
+    'Return ONLY a comma-separated list on one line. No explanation, no markdown.',
+    '',
+    `type: ${type}`,
+    `name: ${name}`,
+    `description: ${meta.description || ''}`,
+    `category: ${meta.category || ''}`,
+    exampleLines ? `examples:\n${exampleLines}` : '',
+    '',
+    'Include: domain terms, use cases, problem types, industries, actions, synonyms.',
+    'Avoid generic words like "use", "create", "help", "tool", "claude", "code".',
+    'Be specific. Prefer nouns and noun phrases over verbs.',
+  ].filter(Boolean).join('\n');
+
+  try {
+    const result = spawnSync('claude', ['-p', prompt], {
+      encoding: 'utf8',
+      timeout: 30000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    if (result.status === 0 && result.stdout) {
+      const raw = result.stdout.trim()
+        .replace(/^```[^\n]*\n?/, '').replace(/\n?```$/, '') // strip any fences
+        .split('\n')[0]  // take first line only
+        .trim();
+      if (raw && raw.includes(',')) {
+        console.log(`  [index] keywords via claude: ${name}`);
+        return raw;
+      }
+    }
+  } catch {}
+
+  console.log(`  [index] keywords via fallback: ${name}`);
+  return generateKeywordsFallback(type, name, meta);
 }
 
 function updateIndex(type, name, meta, filePath) {
