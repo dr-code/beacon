@@ -13,7 +13,7 @@ set -euo pipefail
 
 # ── Config ────────────────────────────────────────────────────────────────────
 CONFIGS_DIR="${HOME}/.claude/mcp-configs"
-PROMPTS_DIR="${HOME}/.claude/scoped-prompts"
+PROMPTS_DIR="${HOME}/.claude/skills"
 
 # ── Parse args ────────────────────────────────────────────────────────────────
 TASK=""
