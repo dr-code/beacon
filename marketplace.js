@@ -271,7 +271,7 @@ let tab='mcp', cat='all', q='', timer=null;
 let mcpData=[], mcpLoading=false, cursors=[null], pageIdx=0, total=0;
 let iMCPs=new Set(), iSkills=new Set(), pending=null;
 
-(async()=>{ await loadInstalled(); renderTab(); })();
+(async()=>{ try{ await loadInstalled(); } catch(e){ console.warn('Could not load installed state:', e); } renderTab(); })();
 
 async function loadInstalled(){
   const [a,b]=await Promise.all([fetch('/api/installed').then(r=>r.json()),fetch('/api/installed-skills').then(r=>r.json())]);
@@ -399,12 +399,15 @@ function renderClients(){
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
+let _sbFn = null;
 function sidebar(cats, active, fn){
+  _sbFn = fn;
   document.getElementById('sidebar').innerHTML='<span class="slabel">Categories</span>'+
-    cats.map(c=>\`<button class="catbtn \${active===c.id?'act':''}" onclick="(\${fn.toString()})('\${c.id}')">
+    cats.map(c=>\`<button class="catbtn \${active===c.id?'act':''}" data-cat="\${esc(c.id)}" onclick="_sbClick(this)">
       <span class="ce">\${c.emoji||'•'}</span>\${c.label}\${c.count!=null?'<span class="cc">'+c.count+'</span>':''}
     </button>\`).join('');
 }
+function _sbClick(el){ if(_sbFn) _sbFn(el.dataset.cat); }
 
 // ── Modals ────────────────────────────────────────────────────────────────────
 function openMCPModal(s){
