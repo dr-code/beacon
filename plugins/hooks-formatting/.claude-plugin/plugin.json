@@ -1,0 +1,18 @@
+{
+  "name": "hooks-formatting",
+  "version": "1.0.0",
+  "description": "Formatting Hooks - Event-driven automation hooks",
+  "author": {
+    "name": "beacon Community",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": [
+    "hooks",
+    "automation",
+    "formatting",
+    "format-javascript-files",
+    "format-python-files"
+  ]
+}

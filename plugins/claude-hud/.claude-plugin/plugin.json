@@ -1,0 +1,14 @@
+{
+  "name": "claude-hud",
+  "description": "Real-time statusline HUD for Claude Code - displays context usage, tool activity, agent tracking, and todo progress",
+  "version": "1.0.0",
+  "author": {
+    "name": "Beacon",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "homepage": "https://github.com/dr-code/beacon",
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": ["hud", "monitoring", "statusline", "context", "tools", "agents", "todos", "claude-code"],
+  "commands": "${CLAUDE_PLUGIN_ROOT}/commands"
+}

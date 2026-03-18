@@ -1,0 +1,17 @@
+{
+  "name": "commands-typescript-migration",
+  "version": "1.0.0",
+  "description": "Commands for migrating JavaScript projects to TypeScript",
+  "author": {
+    "name": "beacon Community",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": [
+    "commands",
+    "slash-commands",
+    "typescript-migration",
+    "migrate-to-typescript"
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "commands-project-setup",
+  "version": "1.0.0",
+  "description": "Commands for initializing and setting up new projects",
+  "author": {
+    "name": "beacon Community",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": [
+    "commands",
+    "slash-commands",
+    "project-setup",
+    "modernize-deps",
+    "setup-development-environment",
+    "setup-formatting",
+    "setup-linting",
+    "setup-monorepo",
+    "setup-rate-limiting"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "agents-design-experience",
+  "version": "1.0.0",
+  "description": "Agents for UI/UX design, accessibility, and user experience optimization",
+  "author": {
+    "name": "beacon Community",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": [
+    "agents",
+    "subagents",
+    "design-experience",
+    "accessibility-specialist",
+    "ui-ux-designer"
+  ]
+}

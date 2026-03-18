@@ -1,0 +1,20 @@
+{
+  "name": "agents-business-finance",
+  "version": "1.0.0",
+  "description": "Agents for business analysis, financial modeling, and KPI tracking",
+  "author": {
+    "name": "beacon Community",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": [
+    "agents",
+    "subagents",
+    "business-finance",
+    "business-analyst",
+    "legal-advisor",
+    "payment-integration",
+    "quant-analyst"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "agents-infrastructure-operations",
+  "version": "1.0.0",
+  "description": "Agents for cloud infrastructure, DevOps, and database operations",
+  "author": {
+    "name": "beacon Community",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": [
+    "agents",
+    "subagents",
+    "infrastructure-operations",
+    "cloud-architect",
+    "database-admin",
+    "database-optimization",
+    "database-optimizer",
+    "deployment-engineer",
+    "devops-troubleshooter",
+    "network-engineer",
+    "terraform-specialist"
+  ]
+}

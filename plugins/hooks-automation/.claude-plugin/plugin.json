@@ -1,0 +1,19 @@
+{
+  "name": "hooks-automation",
+  "version": "1.0.0",
+  "description": "Automation Hooks - Event-driven automation hooks",
+  "author": {
+    "name": "beacon Community",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": [
+    "hooks",
+    "automation",
+    "automation",
+    "build-on-change",
+    "dependency-checker",
+    "slack-notifications"
+  ]
+}

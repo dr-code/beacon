@@ -1,0 +1,28 @@
+{
+  "name": "commands-team-collaboration",
+  "version": "1.0.0",
+  "description": "Commands for team workflows, PR reviews, and collaboration",
+  "author": {
+    "name": "beacon Community",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": [
+    "commands",
+    "slash-commands",
+    "team-collaboration",
+    "architecture-review",
+    "decision-quality-analyzer",
+    "dependency-mapper",
+    "estimate-assistant",
+    "issue-triage",
+    "memory-spring-cleaning",
+    "migration-assistant",
+    "retrospective-analyzer",
+    "session-learning-capture",
+    "sprint-planning",
+    "standup-report",
+    "team-workload-balancer"
+  ]
+}
