@@ -32,7 +32,7 @@ const cache = {
   mcps:    { data: null, at: 0 },
 };
 const fresh = k => cache[k].data !== null && (Date.now() - cache[k].at) < TTL;
-const get   = k => cache[k].data || [];
+const get   = k => (cache[k] && cache[k].data) || [];
 const set   = (k, d) => { cache[k] = { data: d, at: Date.now() }; return d; };
 
 // ── HTTP ──────────────────────────────────────────────────────────────────────
