@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# beacon — run a Claude Code task with isolated MCP context
+#
+# Usage:
+#   beacon <task> [--interactive|-i] ["optional prompt override"]
+#
+# Examples:
+#   beacon review                          # headless review of git diff
+#   beacon review -i                       # interactive terminal, review MCPs loaded
+#   beacon review "focus on security only" # headless with custom prompt
+
+set -euo pipefail
+
+# ── Config ────────────────────────────────────────────────────────────────────
+CONFIGS_DIR="${HOME}/.claude/mcp-configs"
+PROMPTS_DIR="${HOME}/.claude/scoped-prompts"
+
+# ── Parse args ────────────────────────────────────────────────────────────────
+TASK=""
+INTERACTIVE=false
+PROMPT_OVERRIDE=""
+
+for arg in "$@"; do
+  case "$arg" in
+    --interactive|-i) INTERACTIVE=true ;;
+    -*)               echo "Unknown flag: $arg" >&2; exit 1 ;;
+    *)
+      if [[ -z "$TASK" ]]; then
+        TASK="$arg"
+      else
+        PROMPT_OVERRIDE="$arg"
+      fi
+      ;;
+  esac
+done
+
+if [[ -z "$TASK" ]]; then
+  echo "Usage: beacon <task> [--interactive|-i] [\"prompt override\"]" >&2
+  echo ""
+  echo "Available tasks:"
+  for f in "$CONFIGS_DIR"/*.json; do
+    [[ -f "$f" ]] && echo "  $(basename "$f" .json)"
+  done
+  exit 1
+fi
+
+# ── Validate task config exists ───────────────────────────────────────────────
+MCP_CONFIG="${CONFIGS_DIR}/${TASK}.json"
+if [[ ! -f "$MCP_CONFIG" ]]; then
+  echo "Error: No MCP config found for task '${TASK}'" >&2
+  echo "Expected: ${MCP_CONFIG}" >&2
+  echo ""
+  echo "Available tasks:"
+  for f in "$CONFIGS_DIR"/*.json; do
+    [[ -f "$f" ]] && echo "  $(basename "$f" .json)"
+  done
+  exit 1
+fi
+
+# ── Resolve prompt (headless mode only) ───────────────────────────────────────
+resolve_prompt() {
+  if [[ -n "$PROMPT_OVERRIDE" ]]; then
+    echo "$PROMPT_OVERRIDE"
+    return
+  fi
+
+  local prompt_file="${PROMPTS_DIR}/${TASK}.txt"
+  if [[ -f "$prompt_file" ]]; then
+    cat "$prompt_file"
+    return
+  fi
+
+  # Built-in fallback prompts per task
+  case "$TASK" in
+    review)
+      echo "Review the current git diff (or staged changes if no diff). Check for: correctness, edge cases, error handling, naming clarity, and any obvious security issues. Be specific and actionable. Format as a structured report."
+      ;;
+    *)
+      echo "Error: No default prompt for task '${TASK}'. Create ${PROMPTS_DIR}/${TASK}.txt or pass a prompt as an argument." >&2
+      exit 1
+      ;;
+  esac
+}
+
+# ── Base claude command ───────────────────────────────────────────────────────
+# --strict-mcp-config: ONLY load servers from our config, block all global MCPs
+BASE_CMD=(claude --mcp-config "$MCP_CONFIG" --strict-mcp-config)
+
+# ── Execute ───────────────────────────────────────────────────────────────────
+if [[ "$INTERACTIVE" == true ]]; then
+  # Open a new Terminal window with an interactive Claude session
+  # The user can chat freely with only the task-specific MCPs loaded
+  INTERACTIVE_CMD="${BASE_CMD[*]}"
+
+  echo "Opening interactive terminal for task: ${TASK}"
+  echo "MCP config: ${MCP_CONFIG}"
+  echo "MCPs active: $(python3 -c "import json; d=json.load(open('${MCP_CONFIG}')); print(', '.join(d.get('mcpServers',{}).keys()))" 2>/dev/null || echo "(see config)")"
+
+  osascript <<EOF
+tell application "Terminal"
+  activate
+  set newTab to do script "echo '═══ beacon: ${TASK} (interactive) ═══'; echo 'MCP config: ${MCP_CONFIG}'; echo ''; ${INTERACTIVE_CMD}"
+  set custom title of newTab to "claude [${TASK}]"
+end tell
+EOF
+
+else
+  # Headless: run with -p and stream output to current terminal
+  PROMPT="$(resolve_prompt)"
+
+  echo "━━━ beacon: ${TASK} ━━━"
+  echo "Mode: headless"
+  echo "Config: ${MCP_CONFIG}"
+  echo "Prompt: ${PROMPT:0:80}..."
+  echo ""
+
+  "${BASE_CMD[@]}" -p "$PROMPT"
+
+  echo ""
+  echo "━━━ Done ━━━"
+fi
