@@ -1,0 +1,17 @@
+{
+  "name": "all-agents",
+  "version": "1.0.0",
+  "description": "Complete collection of 117 specialized AI agents across 11 categories",
+  "author": {
+    "name": "beacon Community",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": [
+    "agents",
+    "subagents",
+    "all",
+    "bundle"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "hooks-development",
+  "version": "1.0.0",
+  "description": "Development Hooks - Event-driven automation hooks",
+  "author": {
+    "name": "beacon Community",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": [
+    "hooks",
+    "automation",
+    "development",
+    "change-tracker",
+    "file-backup",
+    "lint-on-save",
+    "smart-formatting"
+  ]
+}

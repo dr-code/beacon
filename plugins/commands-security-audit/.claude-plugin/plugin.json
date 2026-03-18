@@ -1,0 +1,20 @@
+{
+  "name": "commands-security-audit",
+  "version": "1.0.0",
+  "description": "Commands for security auditing and vulnerability scanning",
+  "author": {
+    "name": "beacon Community",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": [
+    "commands",
+    "slash-commands",
+    "security-audit",
+    "add-authentication-system",
+    "dependency-audit",
+    "security-audit",
+    "security-hardening"
+  ]
+}

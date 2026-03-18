@@ -1,0 +1,12 @@
+{
+  "name": "frontend-design-pro",
+  "version": "1.0.0",
+  "description": "Advanced frontend design plugin with interactive wizard, trend research, moodboard creation, color/typography selection, and browser-based inspiration analysis",
+  "author": {
+    "name": "beacon Community",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": ["frontend", "design", "ui-ux", "tailwind", "colors", "typography", "accessibility", "moodboard", "skills"]
+}

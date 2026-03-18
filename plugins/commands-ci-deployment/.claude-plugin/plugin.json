@@ -1,0 +1,27 @@
+{
+  "name": "commands-ci-deployment",
+  "version": "1.0.0",
+  "description": "Commands for CI/CD setup, containerization, and deployment automation",
+  "author": {
+    "name": "beacon Community",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": [
+    "commands",
+    "slash-commands",
+    "ci-deployment",
+    "add-changelog",
+    "changelog-demo-command",
+    "ci-setup",
+    "containerize-application",
+    "hotfix-deploy",
+    "prepare-release",
+    "release",
+    "rollback-deploy",
+    "run-ci",
+    "setup-automated-releases",
+    "setup-kubernetes-deployment"
+  ]
+}

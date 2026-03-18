@@ -1,0 +1,17 @@
+{
+  "name": "all-hooks",
+  "version": "1.0.0",
+  "description": "Complete collection of 28 automation hooks for event-driven workflows",
+  "author": {
+    "name": "beacon Community",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": [
+    "hooks",
+    "automation",
+    "all",
+    "bundle"
+  ]
+}

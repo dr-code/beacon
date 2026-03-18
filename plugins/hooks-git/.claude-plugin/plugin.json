@@ -1,0 +1,19 @@
+{
+  "name": "hooks-git",
+  "version": "1.0.0",
+  "description": "Git Hooks - Event-driven automation hooks",
+  "author": {
+    "name": "beacon Community",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": [
+    "hooks",
+    "automation",
+    "git",
+    "auto-git-add",
+    "git-add-changes",
+    "smart-commit"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "commands-miscellaneous",
+  "version": "1.0.0",
+  "description": "General-purpose utility commands",
+  "author": {
+    "name": "beacon Community",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": [
+    "commands",
+    "slash-commands",
+    "miscellaneous",
+    "five",
+    "mermaid",
+    "use-stepper"
+  ]
+}

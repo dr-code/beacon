@@ -1,0 +1,20 @@
+{
+  "name": "commands-api-development",
+  "version": "1.0.0",
+  "description": "Commands for designing and documenting REST and GraphQL APIs",
+  "author": {
+    "name": "beacon Community",
+    "url": "https://github.com/dr-code/beacon"
+  },
+  "repository": "https://github.com/dr-code/beacon",
+  "license": "MIT",
+  "keywords": [
+    "commands",
+    "slash-commands",
+    "api-development",
+    "design-rest-api",
+    "doc-api",
+    "generate-api-documentation",
+    "implement-graphql-api"
+  ]
+}

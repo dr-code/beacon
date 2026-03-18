@@ -1,19 +1,30 @@
 #!/usr/bin/env bash
-# beacon — run a Claude Code task with isolated MCP context
+# beacon — token-efficient task runner for Claude Code
+#
+# Activates only the MCPs, agents, skills, and hooks a task needs.
+# Everything is scoped to the spawned process — zero leakage into other sessions.
 #
 # Usage:
-#   beacon <task> [--interactive|-i] ["optional prompt override"]
+#   beacon                         list installed tasks
+#   beacon <task> [-i] ["prompt"]  run a task (headless or interactive)
 #
-# Examples:
-#   beacon review                          # headless review of git diff
-#   beacon review -i                       # interactive terminal, review MCPs loaded
-#   beacon review "focus on security only" # headless with custom prompt
+# Task bundles: ~/.claude/beacon-tasks/<name>.json
+# Components:   ~/.claude/beacon-tasks/components/{agents,skills,hooks}/
 
 set -euo pipefail
 
-# ── Config ────────────────────────────────────────────────────────────────────
-CONFIGS_DIR="${HOME}/.claude/mcp-configs"
-PROMPTS_DIR="${HOME}/.claude/skills"
+# ── Directories ───────────────────────────────────────────────────────────────
+TASKS_DIR="${HOME}/.claude/beacon-tasks"
+COMPONENTS_DIR="${TASKS_DIR}/components"
+
+# ── Clean up stale temp files from crashed sessions (>1 day old) ──────────────
+find /tmp -maxdepth 1 \( \
+  -name "beacon-mcp-*.json" -o \
+  -name "beacon-settings-*.json" -o \
+  -name "beacon-hook-*.sh" -o \
+  -name "beacon-agents-*.txt" -o \
+  -name "beacon-run-*.sh" \
+\) -mmin +1440 -delete 2>/dev/null || true
 
 # ── Parse args ────────────────────────────────────────────────────────────────
 TASK=""
@@ -34,87 +45,283 @@ for arg in "$@"; do
   esac
 done
 
+# ── No task: list installed tasks ─────────────────────────────────────────────
 if [[ -z "$TASK" ]]; then
-  echo "Usage: beacon <task> [--interactive|-i] [\"prompt override\"]" >&2
+  echo "beacon — token-efficient Claude Code task runner"
   echo ""
-  echo "Available tasks:"
-  for f in "$CONFIGS_DIR"/*.json; do
-    [[ -f "$f" ]] && echo "  $(basename "$f" .json)"
-  done
+  echo "Usage:"
+  echo "  beacon <task>         run task in headless mode"
+  echo "  beacon <task> -i      run task in interactive Terminal window"
+  echo "  beacon <task> \"...\"   run task with custom prompt (headless)"
+  echo ""
+  echo "Installed tasks:"
+  if compgen -G "${TASKS_DIR}/*.json" >/dev/null 2>&1; then
+    for f in "${TASKS_DIR}"/*.json; do
+      name=$(basename "$f" .json)
+      desc=$(python3 -c "
+import json
+d = json.load(open('$f'))
+print(d.get('description', ''))
+" 2>/dev/null || echo "")
+      printf "  %-22s %s\n" "$name" "$desc"
+    done
+  else
+    echo "  (none — visit http://localhost:4747 to browse and install tasks)"
+  fi
+  echo ""
+  exit 0
+fi
+
+# ── Load task bundle ──────────────────────────────────────────────────────────
+BUNDLE_FILE="${TASKS_DIR}/${TASK}.json"
+LEGACY_MCP="${HOME}/.claude/mcp-configs/${TASK}.json"
+USE_LEGACY=false
+
+if [[ ! -f "$BUNDLE_FILE" && -f "$LEGACY_MCP" ]]; then
+  echo "Note: Running legacy MCP config. Install via marketplace for full features." >&2
+  USE_LEGACY=true
+elif [[ ! -f "$BUNDLE_FILE" ]]; then
+  echo "Error: Task '${TASK}' is not installed." >&2
+  echo "Run 'beacon' with no arguments to see installed tasks." >&2
+  echo "Visit http://localhost:4747 to browse and install tasks." >&2
   exit 1
 fi
 
-# ── Validate task config exists ───────────────────────────────────────────────
-MCP_CONFIG="${CONFIGS_DIR}/${TASK}.json"
-if [[ ! -f "$MCP_CONFIG" ]]; then
-  echo "Error: No MCP config found for task '${TASK}'" >&2
-  echo "Expected: ${MCP_CONFIG}" >&2
-  echo ""
-  echo "Available tasks:"
-  for f in "$CONFIGS_DIR"/*.json; do
-    [[ -f "$f" ]] && echo "  $(basename "$f" .json)"
-  done
-  exit 1
+# ── Temp file paths (PID-namespaced, no collisions) ───────────────────────────
+ACTIVE_MCP="/tmp/beacon-mcp-${TASK}-$$.json"
+AGENT_PROMPT_FILE="/tmp/beacon-agents-${TASK}-$$.txt"
+SETTINGS_FILE="/tmp/beacon-settings-${TASK}-$$.json"
+
+# ── Build temp MCP config ─────────────────────────────────────────────────────
+if [[ "$USE_LEGACY" == true ]]; then
+  cp "$LEGACY_MCP" "$ACTIVE_MCP"
+else
+  python3 - "$BUNDLE_FILE" "$ACTIVE_MCP" <<'PYEOF'
+import json, sys
+
+bundle = json.load(open(sys.argv[1]))
+mcp_servers = {}
+for mcp in bundle.get("mcps", []):
+    entry = {}
+    for key in ("command", "args", "url", "env", "type"):
+        if key in mcp and mcp[key]:
+            entry[key] = mcp[key]
+    mcp_servers[mcp["name"]] = entry
+with open(sys.argv[2], "w") as f:
+    json.dump({"mcpServers": mcp_servers}, f, indent=2)
+PYEOF
 fi
 
-# ── Resolve prompt (headless mode only) ───────────────────────────────────────
-resolve_prompt() {
-  if [[ -n "$PROMPT_OVERRIDE" ]]; then
-    echo "$PROMPT_OVERRIDE"
-    return
-  fi
+# ── Build agent system prompt file ───────────────────────────────────────────
+# Agents are injected via --append-system-prompt so they only exist
+# inside the spawned process — never written to ~/.claude/agents/
+if [[ "$USE_LEGACY" == false ]]; then
+  python3 - "$BUNDLE_FILE" "$COMPONENTS_DIR" "$AGENT_PROMPT_FILE" <<'PYEOF'
+import json, sys, re, os
 
-  local prompt_file="${PROMPTS_DIR}/${TASK}.txt"
-  if [[ -f "$prompt_file" ]]; then
-    cat "$prompt_file"
-    return
-  fi
+bundle = json.load(open(sys.argv[1]))
+components_dir = sys.argv[2]
+out_path = sys.argv[3]
+parts = []
 
-  # Built-in fallback prompts per task
-  case "$TASK" in
-    review)
-      echo "Review the current git diff (or staged changes if no diff). Check for: correctness, edge cases, error handling, naming clarity, and any obvious security issues. Be specific and actionable. Format as a structured report."
-      ;;
-    *)
-      echo "Error: No default prompt for task '${TASK}'. Create ${PROMPTS_DIR}/${TASK}.txt or pass a prompt as an argument." >&2
-      exit 1
-      ;;
-  esac
+for agent_name in bundle.get("agents", []):
+    agent_file = os.path.join(components_dir, "agents", f"{agent_name}.md")
+    if not os.path.exists(agent_file):
+        print(f"Warning: agent '{agent_name}' not found", file=sys.stderr)
+        continue
+    content = open(agent_file).read()
+    body = re.sub(r'^---\n.*?\n---\n?', '', content, flags=re.DOTALL).strip()
+    if body:
+        parts.append(f"## Agent: {agent_name}\n\n{body}")
+
+if parts:
+    with open(out_path, "w") as f:
+        f.write("\n\n---\n\n".join(parts))
+PYEOF
+fi
+
+# ── Build temp settings file for hooks ────────────────────────────────────────
+HAS_HOOKS=false
+if [[ "$USE_LEGACY" == false ]]; then
+  python3 - "$BUNDLE_FILE" "$COMPONENTS_DIR" "$SETTINGS_FILE" $$ <<'PYEOF'
+import json, sys, re, os
+
+bundle = json.load(open(sys.argv[1]))
+components_dir = sys.argv[2]
+out_path = sys.argv[3]
+pid = sys.argv[4]
+hooks_config = {}
+
+for hook_ref in bundle.get("hooks", []):
+    hook_name = hook_ref if isinstance(hook_ref, str) else hook_ref.get("name", "")
+    if not hook_name:
+        continue
+    hook_file = os.path.join(components_dir, "hooks", f"{hook_name}.md")
+    if not os.path.exists(hook_file):
+        print(f"Warning: hook '{hook_name}' not found", file=sys.stderr)
+        continue
+    content = open(hook_file).read()
+    fm = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)
+    if not fm:
+        continue
+    meta = {}
+    for line in fm.group(1).split('\n'):
+        m = re.match(r'^([\w-]+):\s*(.*)', line)
+        if m:
+            meta[m.group(1)] = m.group(2).strip()
+
+    event   = meta.get("event", "PostToolUse")
+    matcher = meta.get("matcher", "*")
+    script_match = re.search(r'```bash\n(.*?)```', content, re.DOTALL)
+    if not script_match:
+        continue
+    hook_script = f"/tmp/beacon-hook-{hook_name}-{pid}.sh"
+    with open(hook_script, "w") as f:
+        f.write("#!/usr/bin/env bash\n")
+        f.write(script_match.group(1).strip() + "\n")
+    os.chmod(hook_script, 0o755)
+
+    if event not in hooks_config:
+        hooks_config[event] = []
+    hooks_config[event].append({
+        "matcher": matcher,
+        "hooks": [{"type": "command", "command": f"bash {hook_script}"}]
+    })
+
+with open(out_path, "w") as f:
+    json.dump({"hooks": hooks_config} if hooks_config else {}, f, indent=2)
+PYEOF
+
+  if python3 -c "import json; d=json.load(open('$SETTINGS_FILE')); exit(0 if d.get('hooks') else 1)" 2>/dev/null; then
+    HAS_HOOKS=true
+  fi
+fi
+
+# ── Print activation summary ──────────────────────────────────────────────────
+mcp_names=$(python3 -c "
+import json
+d = json.load(open('$ACTIVE_MCP'))
+keys = list(d.get('mcpServers', {}).keys())
+print(', '.join(keys) if keys else '(none)')
+" 2>/dev/null || echo "(none)")
+
+if [[ "$USE_LEGACY" == false ]]; then
+  agent_names=$(python3 -c "
+import json
+d = json.load(open('$BUNDLE_FILE'))
+a = d.get('agents', [])
+print(', '.join(a) if a else '(none)')
+" 2>/dev/null || echo "(none)")
+
+  hook_names=$(python3 -c "
+import json
+d = json.load(open('$BUNDLE_FILE'))
+h = d.get('hooks', [])
+names = [x if isinstance(x, str) else x.get('name','') for x in h]
+print(', '.join(n for n in names if n) or '(none)')
+" 2>/dev/null || echo "(none)")
+else
+  agent_names="(none)"
+  hook_names="(none)"
+fi
+
+echo "━━━ beacon: ${TASK} ━━━"
+printf "  MCPs:    %s\n" "$mcp_names"
+printf "  Agents:  %s\n" "$agent_names"
+printf "  Hooks:   %s\n" "$hook_names"
+echo ""
+
+# ── Build claude command array ────────────────────────────────────────────────
+# Using a bash array avoids all quoting issues with multi-line agent prompts.
+build_cmd_array() {
+  CMD=(claude --mcp-config "$ACTIVE_MCP" --strict-mcp-config)
+  if [[ -s "$AGENT_PROMPT_FILE" ]]; then
+    CMD+=(--append-system-prompt "$(cat "$AGENT_PROMPT_FILE")")
+  fi
+  if [[ "$HAS_HOOKS" == true ]]; then
+    CMD+=(--settings "$SETTINGS_FILE")
+  fi
 }
 
-# ── Base claude command ───────────────────────────────────────────────────────
-# --strict-mcp-config: ONLY load servers from our config, block all global MCPs
-BASE_CMD=(claude --mcp-config "$MCP_CONFIG" --strict-mcp-config)
+# ── Cleanup handler ───────────────────────────────────────────────────────────
+cleanup_headless() {
+  rm -f "$ACTIVE_MCP" "$AGENT_PROMPT_FILE" "$SETTINGS_FILE" \
+        /tmp/beacon-hook-*-$$.sh 2>/dev/null || true
+}
 
 # ── Execute ───────────────────────────────────────────────────────────────────
 if [[ "$INTERACTIVE" == true ]]; then
-  # Open a new Terminal window with an interactive Claude session
-  # The user can chat freely with only the task-specific MCPs loaded
-  INTERACTIVE_CMD="${BASE_CMD[*]}"
+  # Write a self-contained runner script that owns its temp files.
+  # We CANNOT use this shell's trap for interactive mode: osascript returns
+  # immediately, our EXIT fires, and temp files are deleted before Claude starts.
+  RUNNER="/tmp/beacon-run-${TASK}-$$.sh"
 
-  echo "Opening interactive terminal for task: ${TASK}"
-  echo "MCP config: ${MCP_CONFIG}"
-  echo "MCPs active: $(python3 -c "import json; d=json.load(open('${MCP_CONFIG}')); print(', '.join(d.get('mcpServers',{}).keys()))" 2>/dev/null || echo "(see config)")"
+  # Snapshot the agent prompt path into the runner (file already written above)
+  cat > "$RUNNER" << RUNNER_EOF
+#!/usr/bin/env bash
+_cleanup() {
+  rm -f "${ACTIVE_MCP}" "${AGENT_PROMPT_FILE}" "${SETTINGS_FILE}" \
+        /tmp/beacon-hook-*-$$.sh "${RUNNER}" 2>/dev/null || true
+}
+trap _cleanup EXIT INT TERM
 
-  osascript <<EOF
+echo "━━━ beacon: ${TASK} (interactive) ━━━"
+printf "  MCPs:    %s\n" "${mcp_names}"
+printf "  Agents:  %s\n" "${agent_names}"
+printf "  Hooks:   %s\n" "${hook_names}"
+echo ""
+
+CMD=(claude --mcp-config "${ACTIVE_MCP}" --strict-mcp-config)
+if [[ -s "${AGENT_PROMPT_FILE}" ]]; then
+  CMD+=(--append-system-prompt "\$(cat '${AGENT_PROMPT_FILE}')")
+fi
+if [[ "${HAS_HOOKS}" == true ]]; then
+  CMD+=(--settings "${SETTINGS_FILE}")
+fi
+"\${CMD[@]}"
+RUNNER_EOF
+
+  chmod +x "$RUNNER"
+
+  # Disable our own cleanup — runner script handles it
+  trap - EXIT INT TERM 2>/dev/null || true
+
+  osascript << APPLESCRIPT
 tell application "Terminal"
   activate
-  set newTab to do script "echo '═══ beacon: ${TASK} (interactive) ═══'; echo 'MCP config: ${MCP_CONFIG}'; echo ''; ${INTERACTIVE_CMD}"
+  set newTab to do script "bash ${RUNNER}"
   set custom title of newTab to "claude [${TASK}]"
 end tell
-EOF
+APPLESCRIPT
 
 else
-  # Headless: run with -p and stream output to current terminal
-  PROMPT="$(resolve_prompt)"
+  # Headless mode
+  trap cleanup_headless EXIT INT TERM
 
-  echo "━━━ beacon: ${TASK} ━━━"
+  # Resolve prompt
+  PROMPT=""
+  if [[ -n "$PROMPT_OVERRIDE" ]]; then
+    PROMPT="$PROMPT_OVERRIDE"
+  elif [[ "$USE_LEGACY" == false ]]; then
+    PROMPT=$(python3 -c "
+import json
+d = json.load(open('$BUNDLE_FILE'))
+print(d.get('prompt', ''))
+" 2>/dev/null || echo "")
+  fi
+
+  if [[ -z "$PROMPT" ]]; then
+    echo "Error: No prompt for task '${TASK}'." >&2
+    echo "Pass a prompt as an argument: beacon ${TASK} \"your prompt here\"" >&2
+    exit 1
+  fi
+
   echo "Mode: headless"
-  echo "Config: ${MCP_CONFIG}"
-  echo "Prompt: ${PROMPT:0:80}..."
+  printf "Prompt: %.80s...\n" "$PROMPT"
   echo ""
 
-  "${BASE_CMD[@]}" -p "$PROMPT"
+  build_cmd_array
+  "${CMD[@]}" -p "$PROMPT"
 
   echo ""
   echo "━━━ Done ━━━"
