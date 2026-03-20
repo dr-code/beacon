@@ -554,7 +554,7 @@ function pickerSection(id, label, items) {
     return '<span class="picker-chip" data-picker="' + esc(id) + '" data-val="' + esc(name) + '" onclick="toggleChip(this)">' + esc(name) + '</span>';
   }).join('');
   return '<div class="panel-section"><h4>' + esc(label) + '</h4>' +
-    '<input class="form-input picker-search" placeholder="Filter ' + esc(label.toLowerCase()) + '..." oninput="filterChips(\'' + id + '\', this.value)">' +
+    '<input class="form-input picker-search" placeholder="Filter ' + esc(label.toLowerCase()) + '..." data-picker-id="' + esc(id) + '" oninput="filterChips(this.dataset.pickerId, this.value)">' +
     '<div class="picker-list" id="' + esc(id) + '">' + chips + '</div></div>';
 }
 
