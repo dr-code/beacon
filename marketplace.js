@@ -178,10 +178,10 @@ async function loadComponents() {
     const tree = await fetchJSON(TREE_URL);
     const paths = (tree.tree || []).map(f => f.path);
 
-    const agentPaths   = paths.filter(p => /^plugins\/all-agents\/agents\/[^/]+\.md$/.test(p));
-    const skillPaths   = paths.filter(p => /^plugins\/all-skills\/skills\/[^/]+\/SKILL\.md$/.test(p));
-    const hookPaths    = paths.filter(p => /^plugins\/all-hooks\/hooks\/[^/]+\.md$/.test(p));
-    const commandPaths = paths.filter(p => /^plugins\/all-commands\/commands\/[^/]+\.md$/.test(p));
+    const agentPaths   = paths.filter(p => /^plugins\/[^/]+\/agents\/[^/]+\.md$/.test(p));
+    const skillPaths   = paths.filter(p => /^plugins\/[^/]+\/skills\/[^/]+\/SKILL\.md$/.test(p));
+    const hookPaths    = paths.filter(p => /^plugins\/[^/]+\/hooks\/[^/]+\.md$/.test(p));
+    const commandPaths = paths.filter(p => /^plugins\/[^/]+\/commands\/[^/]+\.md$/.test(p));
 
     const fetchAll = arr => Promise.all(
       arr.map(p => fetchText(RAW + '/' + p).then(txt => ({ p, txt })).catch(() => null))
@@ -594,15 +594,19 @@ http.createServer(async (req, res) => {
 
   // ── Discovery API ─────────────────────────────────────────────────────────
   if (method === 'GET' && url === '/api/tasks') {
-    // Merge built-in tasks with installed state
-    const installedTasks = getInstalledTasks().map(t => t.name);
+    const installedTasksData = getInstalledTasks();
+    const installedTaskNames = installedTasksData.map(t => t.name);
+    const builtInNames       = BUILT_IN_TASKS.map(t => t.name);
     const tasks = BUILT_IN_TASKS.map(t => ({
       ...t,
       tokenCost: (get('agents').filter(a => (t.agents||[]).includes(a.name)).reduce((s,a)=>s+a.tokenCost,0) +
                   (t.mcps||[]).reduce((s,m)=>s+(MCP_TOKEN_BY_CAT[m.category]||3000),0)),
-      installed: installedTasks.includes(t.name),
+      installed: installedTaskNames.includes(t.name),
     }));
-    send(tasks);
+    const customTasks = installedTasksData
+      .filter(t => !builtInNames.includes(t.name))
+      .map(t => ({ ...t, installed: true, tokenCost: 0, custom: true }));
+    send([...tasks, ...customTasks]);
     return;
   }
 

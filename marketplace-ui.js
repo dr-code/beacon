@@ -111,6 +111,18 @@ input.search::placeholder{color:var(--mu);}
 .tc-type{color:var(--mu);font-size:10px;text-transform:uppercase;font-weight:700;width:60px;flex-shrink:0;}
 .tc-names{color:var(--tx);flex:1;}
 .tc-cost{font-size:11px;color:var(--ye);font-weight:600;flex-shrink:0;}
+.form-input{width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:6px;padding:7px 10px;color:var(--tx);font-size:12px;outline:none;resize:vertical;font-family:inherit;}
+.form-input:focus{border-color:var(--ac);}
+.form-input::placeholder{color:var(--mu);}
+textarea.form-input{min-height:72px;line-height:1.5;}
+.picker-search{margin-bottom:6px;resize:none;}
+.picker-list{display:flex;flex-wrap:wrap;gap:5px;max-height:120px;overflow-y:auto;padding:2px 0;}
+.picker-chip{padding:3px 10px;border-radius:10px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--bd);background:var(--sf2);color:var(--mu);transition:all .12s;user-select:none;}
+.picker-chip:hover{border-color:var(--ac);color:var(--tx);}
+.picker-chip.sel{background:rgba(108,143,255,.15);border-color:var(--ac);color:var(--ac);}
+.new-task-btn{padding:4px 12px;border-radius:6px;font-size:11px;font-weight:700;background:rgba(108,143,255,.12);border:1px solid rgba(108,143,255,.3);color:var(--ac);cursor:pointer;transition:all .15s;}
+.new-task-btn:hover{background:rgba(108,143,255,.22);}
+.task-badge{font-size:10px;font-weight:700;text-transform:uppercase;padding:2px 7px;border-radius:8px;background:rgba(167,139,250,.1);border:1px solid rgba(167,139,250,.25);color:var(--ac2);margin-left:6px;}
 </style>
 </head>
 <body>
@@ -160,8 +172,10 @@ input.search::placeholder{color:var(--mu);}
 
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
+var _savedTab = 'tasks';
+try { var _t = localStorage.getItem('beacon-tab'); if (_t && ['tasks','agents','skills','commands','hooks','mcps'].indexOf(_t)>=0) _savedTab = _t; } catch(e) {}
 var S = {
-  tab: 'tasks', search: '', category: '',
+  tab: _savedTab, search: '', category: '',
   data: { tasks:[], agents:[], skills:[], commands:[], hooks:[], mcps:[] },
   installed: { tasks:[], components:{agents:[],skills:[],hooks:[],commands:[]}, mcps:[] },
   tokenStats: { totalSaved:0, installedCount:0 },
@@ -249,7 +263,8 @@ function renderMain() {
   var items = currentItems();
   var tabLabel = S.tab.charAt(0).toUpperCase() + S.tab.slice(1);
   if (S.loading) { $('main').innerHTML = '<div class="loading"><div class="spinner"></div> Loading components...</div>'; return; }
-  var html = '<div class="main-hdr"><h2>' + esc(tabLabel) + '</h2><span class="item-count">' + items.length + ' items</span></div>';
+  var newTaskBtn = S.tab === 'tasks' ? '<button class="new-task-btn" onclick="openCreatePanel()">+ New Task</button>' : '';
+  var html = '<div class="main-hdr"><h2>' + esc(tabLabel) + '</h2><span class="item-count">' + items.length + ' items</span>' + newTaskBtn + '</div>';
   if (!items.length) {
     html += '<div class="empty"><h3>No results</h3><p>Try a different search or category.</p></div>';
   } else {
@@ -277,8 +292,9 @@ function renderCard(item, i) {
     ? '<button class="btn btn-installed" data-action="uninstall" data-type="' + esc(type) + '" data-id="' + esc(id) + '">Installed &#10003;</button>'
     : '<button class="btn btn-primary" data-action="install" data-type="' + esc(type) + '" data-id="' + esc(id) + '">Install</button>';
 
+  var customBadge = item.custom ? '<span class="task-badge">custom</span>' : '';
   return '<div class="card' + (inst?' installed':'') + '" data-action="openPanel" data-idx="' + i + '">' +
-    '<div class="card-top"><span class="card-name">' + esc(item.name||id) + '</span>' +
+    '<div class="card-top"><span class="card-name">' + esc(item.name||id) + customBadge + '</span>' +
     (catStr ? '<span class="card-cat">' + esc(catStr) + '</span>' : '') + '</div>' +
     '<div class="card-desc">' + esc(item.description||'') + '</div>' +
     '<div class="card-foot">' + tokenBadge + instBtn + '</div>' +
@@ -297,12 +313,16 @@ function updateBanner() {
 // ── Tab & category ────────────────────────────────────────────────────────────
 function setTab(tab) {
   S.tab = tab; S.category = ''; S.search = ''; $('search').value = '';
+  try { localStorage.setItem('beacon-tab', tab); } catch(e) {}
   document.querySelectorAll('.tab').forEach(function(t){ t.classList.toggle('active', t.dataset.tab===tab); });
   render();
 }
 function setCategory(cat) { S.category = cat; renderSidebar(); renderMain(); }
 function onSearch(q) { S.search = q; renderMain(); }
-document.querySelectorAll('.tab').forEach(function(t){ t.addEventListener('click', function(){ setTab(t.dataset.tab); }); });
+document.querySelectorAll('.tab').forEach(function(t){
+  t.classList.toggle('active', t.dataset.tab === S.tab);
+  t.addEventListener('click', function(){ setTab(t.dataset.tab); });
+});
 
 // ── Event delegation ──────────────────────────────────────────────────────────
 document.addEventListener('click', function(e) {
@@ -513,6 +533,103 @@ function uninstall(type, id) {
 
 function copyToClipboard(text) {
   if (navigator.clipboard) navigator.clipboard.writeText(text).catch(function(){});
+}
+
+// ── Task builder ──────────────────────────────────────────────────────────────
+function openCreatePanel() {
+  $('panel-name').textContent = 'New Task';
+  $('panel-badges').innerHTML = '<span class="pbadge pbadge-cat">custom</span>';
+  $('panel-body').innerHTML = buildCreateForm();
+  $('panel-foot').innerHTML =
+    '<button class="btn" style="flex:1;background:var(--sf2);border:1px solid var(--bd);color:var(--mu)" onclick="closePanel()">Cancel</button>' +
+    '<button class="btn btn-primary" style="flex:2" onclick="createTask()">Create Task</button>';
+  $('overlay').classList.add('open');
+  $('panel').classList.add('open');
+}
+
+function pickerSection(id, label, items) {
+  if (!items.length) return '';
+  var chips = items.map(function(x) {
+    var name = x.id || x.name;
+    return '<span class="picker-chip" data-picker="' + esc(id) + '" data-val="' + esc(name) + '" onclick="toggleChip(this)">' + esc(name) + '</span>';
+  }).join('');
+  return '<div class="panel-section"><h4>' + esc(label) + '</h4>' +
+    '<input class="form-input picker-search" placeholder="Filter ' + esc(label.toLowerCase()) + '..." oninput="filterChips(\'' + id + '\', this.value)">' +
+    '<div class="picker-list" id="' + esc(id) + '">' + chips + '</div></div>';
+}
+
+function buildCreateForm() {
+  var html = '';
+  html += '<div class="panel-section"><h4>Name <span style="color:var(--rd)">*</span></h4>' +
+    '<input id="ct-name" class="form-input" type="text" placeholder="e.g. api-review (no spaces)"></div>';
+  html += '<div class="panel-section"><h4>Description</h4>' +
+    '<input id="ct-desc" class="form-input" type="text" placeholder="What this task does"></div>';
+  html += '<div class="panel-section"><h4>System Prompt</h4>' +
+    '<textarea id="ct-prompt" class="form-input" rows="4" placeholder="Instructions for Claude when this task runs..."></textarea></div>';
+  html += pickerSection('ct-agents',   'Agents',   S.data.agents);
+  html += pickerSection('ct-skills',   'Skills',   S.data.skills);
+  html += pickerSection('ct-hooks',    'Hooks',    S.data.hooks);
+  html += pickerSection('ct-commands', 'Commands', S.data.commands);
+  html += pickerSection('ct-mcps',     'MCPs',     S.data.mcps);
+  return html;
+}
+
+function toggleChip(el) {
+  el.classList.toggle('sel');
+}
+
+function filterChips(pickerId, q) {
+  var list = $(pickerId);
+  if (!list) return;
+  var lq = q.toLowerCase();
+  list.querySelectorAll('.picker-chip').forEach(function(chip) {
+    var match = !lq || chip.dataset.val.toLowerCase().indexOf(lq) >= 0;
+    chip.style.display = match ? '' : 'none';
+  });
+}
+
+function selectedChips(pickerId) {
+  var list = $(pickerId);
+  if (!list) return [];
+  return Array.from(list.querySelectorAll('.picker-chip.sel')).map(function(c){ return c.dataset.val; });
+}
+
+function createTask() {
+  var name = ($('ct-name') || {}).value || '';
+  name = name.trim().replace(/\s+/g, '-').toLowerCase();
+  if (!name) { alert('Task name is required.'); return; }
+  var bundle = {
+    name:        name,
+    description: ($('ct-desc')   || {}).value || '',
+    prompt:      ($('ct-prompt') || {}).value || '',
+    agents:      selectedChips('ct-agents'),
+    skills:      selectedChips('ct-skills'),
+    hooks:       selectedChips('ct-hooks'),
+    commands:    selectedChips('ct-commands'),
+    mcps:        selectedChips('ct-mcps').map(function(id) {
+      var m = S.data.mcps.find(function(x){ return (x.id||x.name) === id; });
+      return m ? { name: id, command: m.command, args: m.args || [] } : { name: id };
+    }),
+    category:    'custom',
+  };
+  var btn = $('panel-foot').querySelector('.btn-primary');
+  if (btn) { btn.textContent = 'Creating...'; btn.disabled = true; }
+  fetch('/api/install-task', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(bundle) })
+    .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function() { return Promise.all([fetch('/api/tasks').then(function(r){return r.json();}), fetch('/api/installed').then(function(r){return r.json();}), fetch('/api/token-stats').then(function(r){return r.json();})]); })
+    .then(function(results) {
+      S.data.tasks = results[0];
+      S.installed = results[1];
+      S.tokenStats = results[2];
+      closePanel();
+      if (S.tab !== 'tasks') setTab('tasks');
+      else render();
+      updateBanner();
+    })
+    .catch(function(e) {
+      alert('Failed to create task: ' + e.message);
+      if (btn) { btn.textContent = 'Create Task'; btn.disabled = false; }
+    });
 }
 
 loadAll();
