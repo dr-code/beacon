@@ -3,11 +3,12 @@
 // Serves the Beacon task marketplace. No npm dependencies (Node.js built-ins only).
 
 'use strict';
-const http  = require('http');
-const https = require('https');
-const fs    = require('fs');
-const path  = require('path');
-const os    = require('os');
+const http         = require('http');
+const https        = require('https');
+const fs           = require('fs');
+const path         = require('path');
+const os           = require('os');
+const { spawnSync } = require('child_process');
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const PORT         = 4747;
@@ -15,7 +16,8 @@ const HOME         = os.homedir();
 const CLAUDE_DIR   = path.join(HOME, '.claude');
 const TASKS_DIR    = path.join(CLAUDE_DIR, 'beacon-tasks');
 const COMP_DIR     = path.join(TASKS_DIR, 'components');
-const COMMANDS_DIR = path.join(CLAUDE_DIR, 'commands');
+const COMMANDS_DIR  = path.join(CLAUDE_DIR, 'commands');
+const BEACON_INDEX  = path.join(COMP_DIR, 'beacon-index.md');
 
 const REPO       = 'dr-code/beacon';
 const RAW        = `https://raw.githubusercontent.com/${REPO}/main`;
@@ -32,7 +34,7 @@ const cache = {
   mcps:    { data: null, at: 0 },
 };
 const fresh = k => cache[k].data !== null && (Date.now() - cache[k].at) < TTL;
-const get   = k => cache[k].data || [];
+const get   = k => (cache[k] && cache[k].data) || [];
 const set   = (k, d) => { cache[k] = { data: d, at: Date.now() }; return d; };
 
 // ── HTTP ──────────────────────────────────────────────────────────────────────
@@ -341,10 +343,146 @@ function getTokenStats() {
   };
 }
 
+// ── Beacon index (beacon-index.md) ────────────────────────────────────────────
+
+// Algorithmic fallback: used when claude -p is unavailable.
+function generateKeywordsFallback(type, name, meta) {
+  const STOP = new Set([
+    'a','an','the','and','or','but','if','in','on','at','to','of','for','with',
+    'by','from','into','about','via','per','as','so','up','out','then','than',
+    'is','are','was','were','be','been','have','has','had','do','does','did',
+    'will','would','could','should','may','might','can',
+    'this','that','these','those','it','its','you','all','any','each','both',
+    'more','most','some','such','not','only','too','very','well','also','when',
+    'how','what','which','who','use','used','using','proactively','always',
+    'never','immediately','first','ensure','make','start','end','based','given',
+    'new','existing','current','after','before','during','while','just','now',
+    'run','running','create','creating','write','writing','update','check',
+    'get','set','let','try','help','include','provide','return','everything',
+    'last','session','something','anything','nothing','my','your','their','few',
+    'many','much','every','whenever','them','don','wrote','said','made','got',
+  ]);
+  const words = [];
+  words.push(...name.split(/[-_]/));
+  if (meta.category) words.push(...meta.category.split(/[-_]/));
+  if (meta.description) {
+    words.push(...meta.description.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/));
+  }
+  if (Array.isArray(meta.examples)) {
+    for (const ex of meta.examples) {
+      // strip "Use/Have/Run the <name> to/for" preamble
+      const nameRe = name.replace(/[-_]/g, '[\\s-_]');
+      const cleaned = String(ex).replace(
+        new RegExp(`^(?:use|have|run|invoke)\\s+(?:the\\s+)?${nameRe}\\s+(?:to|for|when)\\s+`, 'i'), '');
+      words.push(...cleaned.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/));
+    }
+  }
+  if (type === 'task') {
+    for (const list of [meta.agents||[], meta.skills||[], meta.mcps||[]]) {
+      words.push(...list.map(n => (n.name||n)).flatMap(n => n.split(/[-_]/)));
+    }
+  }
+  const seen = new Set();
+  const out = [];
+  for (const w of words) {
+    const lw = w.toLowerCase().trim();
+    if (lw.length > 2 && !STOP.has(lw) && !seen.has(lw)) { seen.add(lw); out.push(lw); }
+  }
+  return out.slice(0, 25).join(', ');
+}
+
+// Primary: invoke claude -p to generate semantically rich keywords.
+// Falls back to algorithmic extraction if claude is unavailable.
+function generateKeywords(type, name, meta) {
+  const exampleLines = (meta.examples || []).slice(0, 3).map(e => `  - ${e}`).join('\n');
+  const prompt = [
+    'Generate 20 search keywords for this Claude Code component.',
+    'Return ONLY a comma-separated list on one line. No explanation, no markdown.',
+    '',
+    `type: ${type}`,
+    `name: ${name}`,
+    `description: ${meta.description || ''}`,
+    `category: ${meta.category || ''}`,
+    exampleLines ? `examples:\n${exampleLines}` : '',
+    '',
+    'Include: domain terms, use cases, problem types, industries, actions, synonyms.',
+    'Avoid generic words like "use", "create", "help", "tool", "claude", "code".',
+    'Be specific. Prefer nouns and noun phrases over verbs.',
+  ].filter(Boolean).join('\n');
+
+  try {
+    const result = spawnSync('claude', ['-p', prompt], {
+      encoding: 'utf8',
+      timeout: 30000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    if (result.status === 0 && result.stdout) {
+      const raw = result.stdout.trim()
+        .replace(/^```[^\n]*\n?/, '').replace(/\n?```$/, '') // strip any fences
+        .split('\n')[0]  // take first line only
+        .trim();
+      if (raw && raw.includes(',')) {
+        console.log(`  [index] keywords via claude: ${name}`);
+        return raw;
+      }
+    }
+  } catch {}
+
+  console.log(`  [index] keywords via fallback: ${name}`);
+  return generateKeywordsFallback(type, name, meta);
+}
+
+function updateIndex(type, name, meta, filePath) {
+  fs.mkdirSync(path.dirname(BEACON_INDEX), { recursive: true });
+
+  let content = '';
+  try { content = fs.readFileSync(BEACON_INDEX, 'utf8'); } catch {}
+
+  if (!content) {
+    content = '# Beacon Index\n<!-- Auto-updated by beacon marketplace. Do not edit manually. -->\n\n## Task Bundles\n\n## Agents\n\n## Skills\n\n## Hooks\n\n## Commands\n\n## MCPs\n';
+  }
+
+  const keywords = generateKeywords(type, name, meta);
+  const homePath = filePath.replace(os.homedir(), '~');
+  const entry = `- [${type}] ${name} | ${keywords} | ${homePath}`;
+  const sectionMap = { task:'Task Bundles', agent:'Agents', skill:'Skills', hook:'Hooks', command:'Commands', mcp:'MCPs' };
+  const section = sectionMap[type] || 'Agents';
+
+  // Remove existing entry for this name+type if present
+  const lines = content.split('\n').filter(l => {
+    const m = l.match(/^- \[(\w+)\] ([\w-]+) \|/);
+    return !(m && m[1] === type && m[2] === name);
+  });
+
+  // Insert under the right section header
+  const sectionHeader = `## ${section}`;
+  const idx = lines.findIndex(l => l.trim() === sectionHeader);
+  if (idx >= 0) {
+    lines.splice(idx + 1, 0, entry);
+  } else {
+    lines.push('', sectionHeader, entry);
+  }
+
+  fs.writeFileSync(BEACON_INDEX, lines.join('\n'));
+}
+
+function removeFromIndex(type, name) {
+  try {
+    const content = fs.readFileSync(BEACON_INDEX, 'utf8');
+    const filtered = content.split('\n').filter(l => {
+      const m = l.match(/^- \[(\w+)\] ([\w-]+) \|/);
+      return !(m && m[1] === type && m[2] === name);
+    }).join('\n');
+    fs.writeFileSync(BEACON_INDEX, filtered);
+  } catch {}
+}
+
 // ── Install / uninstall ───────────────────────────────────────────────────────
 function installTask(bundle) {
   fs.mkdirSync(TASKS_DIR, { recursive: true });
-  fs.writeFileSync(path.join(TASKS_DIR, `${bundle.name}.json`), JSON.stringify(bundle, null, 2));
+  const taskPath = path.join(TASKS_DIR, `${bundle.name}.json`);
+  fs.writeFileSync(taskPath, JSON.stringify(bundle, null, 2));
+  updateIndex('task', bundle.name, bundle, taskPath);
 
   // Write component files from cache (no additional GitHub fetches needed)
   const allAgents  = get('agents');
@@ -357,6 +495,7 @@ function installTask(bundle) {
       const dest = path.join(COMP_DIR, 'agents', `${agentName}.md`);
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.writeFileSync(dest, item.rawContent);
+      updateIndex('agent', agentName, item, dest);
     }
   }
   for (const skillName of (bundle.skills || [])) {
@@ -365,6 +504,7 @@ function installTask(bundle) {
       const dest = path.join(COMP_DIR, 'skills', skillName, 'SKILL.md');
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.writeFileSync(dest, item.rawContent);
+      updateIndex('skill', skillName, item, dest);
     }
   }
   for (const hookName of (bundle.hooks || [])) {
@@ -373,12 +513,14 @@ function installTask(bundle) {
       const dest = path.join(COMP_DIR, 'hooks', `${hookName}.md`);
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.writeFileSync(dest, item.rawContent);
+      updateIndex('hook', hookName, item, dest);
     }
   }
 }
 
 function uninstallTask(name) {
   try { fs.unlinkSync(path.join(TASKS_DIR, `${name}.json`)); } catch {}
+  removeFromIndex('task', name);
 }
 
 function installComponent(type, name) {
@@ -386,22 +528,20 @@ function installComponent(type, name) {
   const item = (items[type] || []).find(x => x.name === name);
   if (!item || !item.rawContent) throw new Error(`Component not found or content missing: ${type}/${name}`);
 
+  let dest;
   if (type === 'agent') {
-    const dest = path.join(COMP_DIR, 'agents', `${name}.md`);
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.writeFileSync(dest, item.rawContent);
+    dest = path.join(COMP_DIR, 'agents', `${name}.md`);
   } else if (type === 'skill') {
-    const dest = path.join(COMP_DIR, 'skills', name, 'SKILL.md');
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.writeFileSync(dest, item.rawContent);
+    dest = path.join(COMP_DIR, 'skills', name, 'SKILL.md');
   } else if (type === 'hook') {
-    const dest = path.join(COMP_DIR, 'hooks', `${name}.md`);
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.writeFileSync(dest, item.rawContent);
+    dest = path.join(COMP_DIR, 'hooks', `${name}.md`);
   } else if (type === 'command') {
-    const dest = path.join(COMMANDS_DIR, `${name}.md`);
+    dest = path.join(COMMANDS_DIR, `${name}.md`);
+  }
+  if (dest) {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, item.rawContent);
+    updateIndex(type, name, item, dest);
   }
 }
 
@@ -411,6 +551,7 @@ function installMCP(id) {
   const dest = path.join(TASKS_DIR, 'mcps', `${id}.json`);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.writeFileSync(dest, JSON.stringify({ name: id, command: mcp.command, args: mcp.args, env: mcp.env }, null, 2));
+  updateIndex('mcp', id, mcp, dest);
   // Also write the slash command for beacon invocation
   fs.mkdirSync(COMMANDS_DIR, { recursive: true });
   fs.writeFileSync(path.join(COMMANDS_DIR, `${id}.md`),
@@ -424,6 +565,7 @@ function uninstallComponent(type, name) {
   if (type === 'command') { try { fs.unlinkSync(path.join(COMMANDS_DIR,`${name}.md`)); } catch {} }
   if (type === 'mcp')     { try { fs.unlinkSync(path.join(TASKS_DIR,'mcps',`${name}.json`)); } catch {}
                              try { fs.unlinkSync(path.join(COMMANDS_DIR,`${name}.md`)); } catch {} }
+  removeFromIndex(type, name);
 }
 
 // ── Kick off background loading ───────────────────────────────────────────────
